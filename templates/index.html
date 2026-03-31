@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spotify NLQ — 자연어로 음악 탐색</title>
+  <meta name="description" content="SQL 없이 자연어로 Spotify 트랙을 검색하세요.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
+  <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
+  <script src="https://unpkg.com/motion@latest/dist/motion.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Pretendard', 'system-ui', 'sans-serif'],
+            mono: ['SF Mono', 'Fira Code', 'Consolas', 'monospace'],
+          },
+          colors: {
+            sp: { green: '#1DB954', glow: '#1ed760' },
+            bg: { deep: '#060606', card: '#0c0c0c', hover: '#111111', line: '#1a1a1a' }
+          }
+        },
+      },
+    }
+  </script>
+  <style>
+    * { word-break: keep-all; }
+    html { scroll-behavior: smooth; }
+    body { background: #060606; overflow-x: hidden; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1a1a1a; border-radius: 2px; }
+
+    /* Canvas behind hero */
+    #particleCanvas {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* Ambient glow orbs */
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0;
+      animation: orbPulse 8s ease-in-out infinite;
+    }
+    .orb-1 {
+      width: 400px; height: 400px;
+      background: rgba(29, 185, 84, 0.07);
+      top: -10%; left: -5%;
+      animation-delay: 0s;
+    }
+    .orb-2 {
+      width: 300px; height: 300px;
+      background: rgba(29, 185, 84, 0.04);
+      bottom: 10%; right: -8%;
+      animation-delay: 3s;
+    }
+    .orb-3 {
+      width: 200px; height: 200px;
+      background: rgba(30, 215, 96, 0.05);
+      top: 40%; left: 50%;
+      animation-delay: 5s;
+    }
+    @keyframes orbPulse {
+      0%, 100% { opacity: 0; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    /* Typing cursor */
+    .cursor-blink::after {
+      content: '|';
+      color: #1DB954;
+      animation: blink 1s step-end infinite;
+      margin-left: 2px;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    /* Sound wave bars */
+    .wave-bar {
+      display: inline-block;
+      width: 3px;
+      background: #1DB954;
+      border-radius: 2px;
+      animation: wave 1.2s ease-in-out infinite;
+    }
+    .wave-bar:nth-child(1) { animation-delay: 0s; height: 8px; }
+    .wave-bar:nth-child(2) { animation-delay: 0.15s; height: 16px; }
+    .wave-bar:nth-child(3) { animation-delay: 0.3s; height: 10px; }
+    .wave-bar:nth-child(4) { animation-delay: 0.45s; height: 20px; }
+    .wave-bar:nth-child(5) { animation-delay: 0.6s; height: 12px; }
+    @keyframes wave {
+      0%, 100% { transform: scaleY(0.5); }
+      50% { transform: scaleY(1.2); }
+    }
+
+    /* Magnetic button */
+    .mag-btn {
+      position: relative;
+      transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .mag-btn:hover { transform: scale(1.04); }
+    .mag-btn:active { transform: scale(0.97); }
+    .mag-btn::before {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: inherit;
+      background: linear-gradient(135deg, #1DB954, #1ed760);
+      z-index: -1;
+      opacity: 0;
+      transition: opacity 0.4s;
+      filter: blur(12px);
+    }
+    .mag-btn:hover::before { opacity: 0.5; }
+
+    /* Result row entrance */
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-12px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .row-animate {
+      animation: slideIn 0.3s ease-out forwards;
+      opacity: 0;
+    }
+
+    /* SQL typewriter */
+    .sql-type {
+      overflow: hidden;
+      white-space: pre-wrap;
+    }
+
+    /* Stat counter */
+    .stat-num {
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Chip hover lift */
+    .chip {
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .chip:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 20px rgba(29, 185, 84, 0.15);
+      border-color: rgba(29, 185, 84, 0.3);
+    }
+
+    /* Section reveal */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Horizontal scroll marquee */
+    @keyframes marquee {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+    .marquee-track {
+      animation: marquee 30s linear infinite;
+    }
+    .marquee-track:hover {
+      animation-play-state: paused;
+    }
+
+    /* Glow line */
+    .glow-line {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #1DB95440, transparent);
+    }
+
+    /* Input focus ring */
+    #queryInput:focus {
+      border-color: #1DB954;
+      box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.12), 0 0 60px rgba(29, 185, 84, 0.06);
+    }
+
+    /* Noise */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      pointer-events: none;
+      opacity: 0.02;
+      background: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+  </style>
+</head>
+<body class="text-white min-h-[100dvh] relative">
+
+  <!-- Ambient Orbs -->
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+
+  <!-- Particle Canvas -->
+  <canvas id="particleCanvas"></canvas>
+
+  <!-- Nav — minimal, not a glass pill -->
+  <nav class="fixed top-0 left-0 right-0 z-40 py-4">
+    <div class="max-w-6xl mx-auto px-6 flex items-center justify-between">
+      <a href="#" class="flex items-center gap-2.5 group">
+        <div class="w-8 h-8 rounded-lg bg-sp-green/10 flex items-center justify-center group-hover:bg-sp-green/20 transition-colors duration-300">
+          <iconify-icon icon="solar:music-note-slider-bold" class="text-sp-green text-base"></iconify-icon>
+        </div>
+        <span class="text-sm font-semibold tracking-tight text-zinc-300 group-hover:text-white transition-colors">Spotify NLQ</span>
+      </a>
+      <div class="flex items-center gap-5">
+        <a href="#how" class="text-xs text-zinc-600 hover:text-zinc-300 transition-colors">How it works</a>
+        <a href="https://github.com/1wos/spotify-nlq-agent" target="_blank" class="text-xs text-zinc-600 hover:text-zinc-300 transition-colors flex items-center gap-1">
+          <iconify-icon icon="solar:code-square-linear"></iconify-icon>
+          Source
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="relative z-10">
+
+    <!-- ═══ HERO ═══ -->
+    <section class="min-h-[85dvh] flex flex-col justify-center max-w-6xl mx-auto px-6 pt-20">
+      <div class="max-w-2xl">
+        <div class="flex items-center gap-3 mb-8 reveal">
+          <div class="flex items-end gap-[3px] h-5">
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+          </div>
+          <span class="text-xs text-zinc-500 uppercase tracking-widest">Natural Language Query</span>
+        </div>
+
+        <h1 class="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.08] mb-6 reveal">
+          물어보세요,<br>
+          <span id="heroTyping" class="text-sp-green cursor-blink"></span>
+        </h1>
+
+        <p class="text-zinc-500 text-base sm:text-lg leading-relaxed max-w-[48ch] mb-10 reveal">
+          BPM, 에너지, 댄스 지수, 장르 — 복잡한 쿼리 대신
+          자연어 한 줄이면 충분합니다.
+        </p>
+
+        <!-- Mode Tabs -->
+        <div class="reveal flex gap-1 mb-5 bg-bg-card rounded-xl p-1 border border-bg-line inline-flex">
+          <button onclick="switchMode('text')" id="tabText" class="mode-tab px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-300 bg-sp-green/10 text-sp-green">
+            <iconify-icon icon="solar:chat-round-line-linear" class="mr-1 align-middle"></iconify-icon>
+            자연어 검색
+          </button>
+          <button onclick="switchMode('image')" id="tabImage" class="mode-tab px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-300 text-zinc-500 hover:text-zinc-300">
+            <iconify-icon icon="solar:gallery-minimalistic-linear" class="mr-1 align-middle"></iconify-icon>
+            이미지로 추천
+          </button>
+        </div>
+
+        <!-- Text Query Mode -->
+        <div id="modeText" class="reveal">
+          <form id="queryForm" onsubmit="handleQuery(event)" class="relative">
+            <input
+              type="text"
+              id="queryInput"
+              class="w-full bg-bg-card border border-bg-line rounded-2xl pl-5 pr-28 py-5 text-white text-base placeholder:text-zinc-700 focus:outline-none transition-all duration-500"
+              placeholder="예: 비 오는 날 듣기 좋은 어쿠스틱 곡"
+              autocomplete="off"
+            >
+            <button
+              type="submit"
+              id="submitBtn"
+              class="mag-btn absolute right-2.5 top-1/2 -translate-y-1/2 px-5 py-2.5 bg-sp-green text-bg-deep font-bold text-sm rounded-xl flex items-center gap-1.5"
+            >
+              <iconify-icon icon="solar:magnifer-linear"></iconify-icon>
+              검색
+            </button>
+          </form>
+
+          <!-- Chips -->
+          <div class="flex flex-wrap gap-2 mt-4">
+            <button onclick="setQuery('댄스 장르에서 에너지 높은 인기곡 10개')" class="chip text-[11px] px-3 py-1.5 rounded-full border border-bg-line text-zinc-500 hover:text-sp-green bg-transparent">
+              에너지 높은 댄스곡
+            </button>
+            <button onclick="setQuery('BPM 120 이상인 신나는 팝 노래')" class="chip text-[11px] px-3 py-1.5 rounded-full border border-bg-line text-zinc-500 hover:text-sp-green bg-transparent">
+              빠른 팝
+            </button>
+            <button onclick="setQuery('공부할 때 듣기 좋은 잔잔한 인스트루멘탈')" class="chip text-[11px] px-3 py-1.5 rounded-full border border-bg-line text-zinc-500 hover:text-sp-green bg-transparent">
+              공부용 잔잔한 곡
+            </button>
+            <button onclick="setQuery('장르별 평균 danceability 비교해줘')" class="chip text-[11px] px-3 py-1.5 rounded-full border border-bg-line text-zinc-500 hover:text-sp-green bg-transparent">
+              장르 비교
+            </button>
+            <button onclick="setQuery('Jason Mraz 곡 중 인기순 정렬')" class="chip text-[11px] px-3 py-1.5 rounded-full border border-bg-line text-zinc-500 hover:text-sp-green bg-transparent">
+              아티스트 검색
+            </button>
+          </div>
+        </div>
+
+        <!-- Image Upload Mode -->
+        <div id="modeImage" class="hidden">
+          <div id="dropZone" class="relative border-2 border-dashed border-bg-line rounded-2xl p-10 text-center cursor-pointer hover:border-sp-green/30 transition-all duration-500 bg-bg-card group"
+               onclick="document.getElementById('imageInput').click()"
+               ondragover="event.preventDefault(); this.classList.add('border-sp-green/50', 'bg-sp-green/[0.02]')"
+               ondragleave="this.classList.remove('border-sp-green/50', 'bg-sp-green/[0.02]')"
+               ondrop="handleDrop(event)">
+            <!-- Preview (hidden by default) -->
+            <img id="imagePreview" class="hidden mx-auto max-h-48 rounded-xl mb-4 object-cover shadow-lg shadow-sp-green/5">
+            <!-- Upload prompt -->
+            <div id="uploadPrompt">
+              <div class="w-14 h-14 rounded-2xl bg-sp-green/5 flex items-center justify-center mx-auto mb-4 group-hover:bg-sp-green/10 transition-colors duration-300">
+                <iconify-icon icon="solar:gallery-add-linear" class="text-sp-green text-2xl"></iconify-icon>
+              </div>
+              <p class="text-sm text-zinc-400 mb-1">이미지를 드래그하거나 클릭해서 업로드</p>
+              <p class="text-[11px] text-zinc-600">사진의 분위기를 분석해서 어울리는 음악을 추천합니다</p>
+            </div>
+            <input type="file" id="imageInput" class="hidden" accept="image/*" onchange="handleImageSelect(event)">
+          </div>
+          <!-- Mood display -->
+          <div id="moodDisplay" class="hidden mt-4 p-4 bg-bg-card border border-bg-line rounded-xl">
+            <div class="flex items-center gap-2 mb-2">
+              <iconify-icon icon="solar:magic-stick-3-linear" class="text-sp-green"></iconify-icon>
+              <span class="text-[11px] text-zinc-500 uppercase tracking-widest">Detected Mood</span>
+            </div>
+            <p id="moodText" class="text-sm text-zinc-300 leading-relaxed"></p>
+            <div id="moodTags" class="flex flex-wrap gap-2 mt-3"></div>
+          </div>
+          <!-- Analyze button -->
+          <button id="analyzeBtn" onclick="handleImageQuery()" class="hidden mag-btn mt-4 w-full py-4 bg-sp-green text-bg-deep font-bold text-sm rounded-xl flex items-center justify-center gap-2">
+            <iconify-icon icon="solar:music-note-slider-linear"></iconify-icon>
+            이 분위기에 맞는 음악 찾기
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ GENRE MARQUEE ═══ -->
+    <section class="py-12 overflow-hidden reveal">
+      <div class="glow-line mb-8"></div>
+      <div class="relative whitespace-nowrap overflow-hidden">
+        <div class="marquee-track inline-flex gap-6">
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">acoustic</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">hip-hop</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">jazz</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">pop</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">rock</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">electronic</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">classical</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">r&b</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">latin</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">metal</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">blues</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">reggae</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">country</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">indie</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">soul</span>
+          <span class="text-zinc-800">/</span>
+          <!-- Duplicate for seamless loop -->
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">acoustic</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">hip-hop</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">jazz</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">pop</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">rock</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">electronic</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">classical</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">r&b</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">latin</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">metal</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">blues</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">reggae</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">country</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">indie</span>
+          <span class="text-zinc-800">/</span>
+          <span class="text-[11px] text-zinc-700 uppercase tracking-widest">soul</span>
+          <span class="text-zinc-800">/</span>
+        </div>
+      </div>
+      <div class="glow-line mt-8"></div>
+    </section>
+
+    <!-- ═══ RESULTS AREA ═══ -->
+    <section id="resultsArea" class="max-w-6xl mx-auto px-6 pb-8">
+
+      <!-- Loading -->
+      <div id="loadingState" class="hidden py-16 text-center">
+        <div class="inline-flex items-end gap-[3px] h-8 mb-4">
+          <span class="wave-bar" style="height:12px"></span>
+          <span class="wave-bar" style="height:20px"></span>
+          <span class="wave-bar" style="height:14px"></span>
+          <span class="wave-bar" style="height:24px"></span>
+          <span class="wave-bar" style="height:16px"></span>
+        </div>
+        <p class="text-sm text-zinc-600">쿼리를 분석하고 있습니다</p>
+      </div>
+
+      <!-- Error -->
+      <div id="errorState" class="hidden py-8">
+        <div class="border border-red-500/10 rounded-xl p-5 bg-red-500/[0.02]">
+          <p class="text-sm text-red-400/80" id="errorMsg"></p>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div id="resultState" class="hidden">
+        <!-- SQL -->
+        <div class="mb-6">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-1.5 h-1.5 rounded-full bg-sp-green"></div>
+            <span class="text-[11px] text-zinc-500 uppercase tracking-widest">Generated SQL</span>
+          </div>
+          <div class="bg-bg-card border border-bg-line rounded-xl p-5 overflow-x-auto">
+            <pre id="sqlDisplay" class="sql-type text-[13px] text-emerald-400/70 font-mono leading-relaxed"></pre>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-1.5 h-1.5 rounded-full bg-sp-green"></div>
+              <span class="text-[11px] text-zinc-500 uppercase tracking-widest">Results</span>
+            </div>
+            <span id="rowCount" class="text-[11px] text-zinc-600 font-mono"></span>
+          </div>
+          <div class="border border-bg-line rounded-xl overflow-hidden bg-bg-card">
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead id="tHead" class="bg-sp-green/[0.04]"></thead>
+                <tbody id="tBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ LIVE STATS (from API) ═══ -->
+    <section class="py-20 reveal" id="stats">
+      <div class="max-w-6xl mx-auto px-6">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-bg-line rounded-xl overflow-hidden border border-bg-line">
+          <div class="bg-bg-deep p-8 text-center">
+            <p class="stat-num text-3xl sm:text-4xl font-bold text-white" data-count="114000">0</p>
+            <p class="text-[11px] text-zinc-600 mt-2 uppercase tracking-widest">Tracks</p>
+          </div>
+          <div class="bg-bg-deep p-8 text-center">
+            <p class="stat-num text-3xl sm:text-4xl font-bold text-white" data-count="125">0</p>
+            <p class="text-[11px] text-zinc-600 mt-2 uppercase tracking-widest">Genres</p>
+          </div>
+          <div class="bg-bg-deep p-8 text-center">
+            <p class="stat-num text-3xl sm:text-4xl font-bold text-white" data-count="0" id="statArtists">--</p>
+            <p class="text-[11px] text-zinc-600 mt-2 uppercase tracking-widest">Artists</p>
+          </div>
+          <div class="bg-bg-deep p-8 text-center">
+            <p class="stat-num text-3xl sm:text-4xl font-bold text-sp-green" data-count="0" id="statAvgBpm">--</p>
+            <p class="text-[11px] text-zinc-600 mt-2 uppercase tracking-widest">Avg BPM</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ HOW IT WORKS ═══ -->
+    <section id="how" class="py-20 reveal">
+      <div class="max-w-6xl mx-auto px-6">
+        <div class="glow-line mb-16"></div>
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-20">
+          <!-- Left — title -->
+          <div class="lg:col-span-4">
+            <span class="text-[11px] text-zinc-600 uppercase tracking-widest block mb-3">How it works</span>
+            <h2 class="text-2xl sm:text-3xl font-bold tracking-tight leading-snug text-zinc-200">
+              자연어 한 줄이<br>SQL이 됩니다
+            </h2>
+          </div>
+          <!-- Right — steps -->
+          <div class="lg:col-span-8 space-y-10">
+            <div class="flex gap-5 group">
+              <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-sp-green/8 border border-sp-green/10 flex items-center justify-center text-sp-green text-sm font-bold group-hover:bg-sp-green/15 transition-colors duration-300">1</div>
+              <div>
+                <p class="font-semibold text-zinc-200 mb-1">자연어로 질문</p>
+                <p class="text-sm text-zinc-600 leading-relaxed">"비 오는 날 듣기 좋은 어쿠스틱 곡" 같은 일상 언어로 입력합니다.</p>
+              </div>
+            </div>
+            <div class="flex gap-5 group">
+              <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-sp-green/8 border border-sp-green/10 flex items-center justify-center text-sp-green text-sm font-bold group-hover:bg-sp-green/15 transition-colors duration-300">2</div>
+              <div>
+                <p class="font-semibold text-zinc-200 mb-1">AlloyDB AI가 SQL로 변환</p>
+                <p class="text-sm text-zinc-600 leading-relaxed">테이블 스키마와 컬럼 의미를 이해하고, 정확한 SQL 쿼리를 생성합니다.</p>
+              </div>
+            </div>
+            <div class="flex gap-5 group">
+              <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-sp-green/8 border border-sp-green/10 flex items-center justify-center text-sp-green text-sm font-bold group-hover:bg-sp-green/15 transition-colors duration-300">3</div>
+              <div>
+                <p class="font-semibold text-zinc-200 mb-1">114K 트랙에서 즉시 검색</p>
+                <p class="text-sm text-zinc-600 leading-relaxed">AlloyDB PostgreSQL이 쿼리를 실행하고 결과를 반환합니다.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer — minimal -->
+  <footer class="border-t border-bg-line py-6">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <span class="text-[11px] text-zinc-700">Gen AI Academy APAC — Cohort 1, Track 3</span>
+      <span class="text-[11px] text-zinc-700">AlloyDB AI + Spotify Tracks Dataset</span>
+    </div>
+  </footer>
+
+  <script>
+    // ═══ PARTICLES ═══
+    const canvas = document.getElementById('particleCanvas');
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    class Particle {
+      constructor() {
+        this.reset();
+      }
+      reset() {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.size = Math.random() * 1.5 + 0.5;
+        this.speedX = (Math.random() - 0.5) * 0.3;
+        this.speedY = (Math.random() - 0.5) * 0.3;
+        this.opacity = Math.random() * 0.3 + 0.05;
+      }
+      update() {
+        this.x += this.speedX;
+        this.y += this.speedY;
+        if (this.x < 0 || this.x > canvas.width || this.y < 0 || this.y > canvas.height) this.reset();
+      }
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(29, 185, 84, ${this.opacity})`;
+        ctx.fill();
+      }
+    }
+
+    for (let i = 0; i < 60; i++) particles.push(new Particle());
+
+    function animateParticles() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach(p => { p.update(); p.draw(); });
+      requestAnimationFrame(animateParticles);
+    }
+    animateParticles();
+
+    // ═══ HERO TYPING ═══
+    const typingPhrases = [
+      '음악을 찾아드릴게요.',
+      'SQL은 저한테 맡기세요.',
+      '어떤 곡이 궁금하세요?',
+      '장르, BPM, 분위기 뭐든.',
+    ];
+    let phraseIdx = 0, charIdx = 0, isDeleting = false;
+    const heroEl = document.getElementById('heroTyping');
+
+    function typeEffect() {
+      const current = typingPhrases[phraseIdx];
+      if (!isDeleting) {
+        heroEl.textContent = current.substring(0, charIdx + 1);
+        charIdx++;
+        if (charIdx === current.length) {
+          setTimeout(() => { isDeleting = true; typeEffect(); }, 2000);
+          return;
+        }
+        setTimeout(typeEffect, 60);
+      } else {
+        heroEl.textContent = current.substring(0, charIdx - 1);
+        charIdx--;
+        if (charIdx === 0) {
+          isDeleting = false;
+          phraseIdx = (phraseIdx + 1) % typingPhrases.length;
+          setTimeout(typeEffect, 400);
+          return;
+        }
+        setTimeout(typeEffect, 30);
+      }
+    }
+    setTimeout(typeEffect, 800);
+
+    // ═══ SCROLL REVEAL ═══
+    const revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.classList.add('visible');
+          revealObserver.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.15 });
+    document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+    // ═══ COUNTER ANIMATION ═══
+    const countObserver = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          const el = e.target;
+          const target = parseInt(el.dataset.count);
+          if (!target) return;
+          let current = 0;
+          const step = Math.ceil(target / 60);
+          const timer = setInterval(() => {
+            current += step;
+            if (current >= target) {
+              current = target;
+              clearInterval(timer);
+            }
+            el.textContent = current.toLocaleString();
+          }, 20);
+          countObserver.unobserve(el);
+        }
+      });
+    }, { threshold: 0.5 });
+    document.querySelectorAll('.stat-num[data-count]').forEach(el => countObserver.observe(el));
+
+    // ═══ FETCH LIVE STATS ═══
+    async function fetchStats() {
+      try {
+        const res = await fetch('/stats');
+        if (!res.ok) return;
+        const data = await res.json();
+        const artistsEl = document.getElementById('statArtists');
+        const bpmEl = document.getElementById('statAvgBpm');
+        if (data.artists) { artistsEl.dataset.count = data.artists; artistsEl.textContent = '0'; }
+        if (data.avg_bpm) { bpmEl.dataset.count = Math.round(data.avg_bpm); bpmEl.textContent = '0'; }
+      } catch {}
+    }
+    fetchStats();
+
+    // ═══ MODE SWITCH ═══
+    let currentMode = 'text';
+    function switchMode(mode) {
+      currentMode = mode;
+      document.getElementById('modeText').classList.toggle('hidden', mode !== 'text');
+      document.getElementById('modeImage').classList.toggle('hidden', mode !== 'image');
+      document.querySelectorAll('.mode-tab').forEach(t => {
+        t.classList.remove('bg-sp-green/10', 'text-sp-green');
+        t.classList.add('text-zinc-500');
+      });
+      const active = mode === 'text' ? 'tabText' : 'tabImage';
+      document.getElementById(active).classList.add('bg-sp-green/10', 'text-sp-green');
+      document.getElementById(active).classList.remove('text-zinc-500');
+    }
+
+    // ═══ IMAGE UPLOAD ═══
+    let uploadedFile = null;
+
+    function handleDrop(e) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('border-sp-green/50', 'bg-sp-green/[0.02]');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) processImage(file);
+    }
+
+    function handleImageSelect(e) {
+      const file = e.target.files[0];
+      if (file) processImage(file);
+    }
+
+    function processImage(file) {
+      uploadedFile = file;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const preview = document.getElementById('imagePreview');
+        preview.src = e.target.result;
+        preview.classList.remove('hidden');
+        document.getElementById('uploadPrompt').classList.add('hidden');
+        document.getElementById('analyzeBtn').classList.remove('hidden');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function handleImageQuery() {
+      if (!uploadedFile) return;
+
+      showState('loadingState');
+      document.getElementById('resultsArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      const formData = new FormData();
+      formData.append('image', uploadedFile);
+
+      try {
+        const res = await fetch('/query/image', { method: 'POST', body: formData });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+
+        // Show mood analysis
+        if (data.mood) {
+          const moodDisplay = document.getElementById('moodDisplay');
+          moodDisplay.classList.remove('hidden');
+          document.getElementById('moodText').textContent = data.mood.description || '';
+          const tagsEl = document.getElementById('moodTags');
+          tagsEl.innerHTML = '';
+          (data.mood.tags || []).forEach(tag => {
+            const span = document.createElement('span');
+            span.className = 'text-[11px] px-2.5 py-1 rounded-full border border-sp-green/20 text-sp-green/70';
+            span.textContent = tag;
+            tagsEl.appendChild(span);
+          });
+        }
+
+        renderResults(data);
+      } catch (err) {
+        document.getElementById('errorMsg').textContent = err.message || '이미지 분석 실패';
+        showState('errorState');
+      }
+    }
+
+    // ═══ QUERY ═══
+    function setQuery(text) {
+      const input = document.getElementById('queryInput');
+      input.value = text;
+      input.focus();
+    }
+
+    function showState(state) {
+      ['loadingState', 'errorState', 'resultState'].forEach(id =>
+        document.getElementById(id).classList.add('hidden')
+      );
+      if (state) document.getElementById(state).classList.remove('hidden');
+    }
+
+    async function handleQuery(e) {
+      e.preventDefault();
+      const q = document.getElementById('queryInput').value.trim();
+      if (!q) return;
+
+      showState('loadingState');
+      document.getElementById('resultsArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      try {
+        const res = await fetch('/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: q })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        renderResults(data);
+      } catch (err) {
+        document.getElementById('errorMsg').textContent = err.message || '연결 실패';
+        showState('errorState');
+      }
+    }
+
+    function renderResults(data) {
+      showState('resultState');
+
+      // SQL typewriter effect
+      const sqlEl = document.getElementById('sqlDisplay');
+      sqlEl.textContent = '';
+      if (data.sql) {
+        let i = 0;
+        const sqlText = data.sql;
+        function typeSql() {
+          if (i < sqlText.length) {
+            sqlEl.textContent += sqlText[i];
+            i++;
+            setTimeout(typeSql, 8);
+          }
+        }
+        typeSql();
+      }
+
+      // Table
+      const rows = data.results || [];
+      document.getElementById('rowCount').textContent = `${rows.length} rows`;
+
+      const tHead = document.getElementById('tHead');
+      const tBody = document.getElementById('tBody');
+      tHead.innerHTML = '';
+      tBody.innerHTML = '';
+
+      if (rows.length > 0) {
+        const cols = Object.keys(rows[0]);
+
+        const hr = document.createElement('tr');
+        cols.forEach(c => {
+          const th = document.createElement('th');
+          th.className = 'px-4 py-3 text-left text-[11px] font-semibold text-sp-green/60 uppercase tracking-wider border-b border-bg-line';
+          th.textContent = c;
+          hr.appendChild(th);
+        });
+        tHead.appendChild(hr);
+
+        rows.forEach((row, idx) => {
+          const tr = document.createElement('tr');
+          tr.className = 'row-animate border-b border-bg-line/50 hover:bg-white/[0.015] transition-colors';
+          tr.style.animationDelay = `${idx * 40}ms`;
+          cols.forEach(c => {
+            const td = document.createElement('td');
+            td.className = 'px-4 py-3 text-[13px] text-zinc-400 whitespace-nowrap';
+            const v = row[c];
+            td.textContent = typeof v === 'number' ? (Number.isInteger(v) ? v.toLocaleString() : v.toFixed(3)) : (v || '-');
+            tr.appendChild(td);
+          });
+          tBody.appendChild(tr);
+        });
+      }
+    }
+  </script>
+
+</body>
+</html>

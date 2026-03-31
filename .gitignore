@@ -1,0 +1,9 @@
+*.csv
+.env
+__pycache__/
+.idea/
+.vscode/
+skills/
+*.pyc
+*.drawio
+*.excalidraw.json

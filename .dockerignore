@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+__pycache__
+*.pyc
+*.csv
+skills/
+screenshots/
+setup_guide.md
+track3-ppt-content.md
+sql/
