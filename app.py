@@ -8,6 +8,7 @@ import logging
 import os
 
 from google import genai
+from google.genai import types
 import pg8000
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 
@@ -203,13 +204,10 @@ Return ONLY the JSON, no markdown."""
 
 
 def analyze_image_mood(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
-    b64 = base64.b64encode(image_bytes).decode()
+    image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
     response = client.models.generate_content(
         model="gemini-2.5-flash",
-        contents=[
-            IMAGE_MOOD_PROMPT,
-            {"mime_type": mime_type, "data": b64},
-        ],
+        contents=[IMAGE_MOOD_PROMPT, image_part],
     )
     text = response.text.strip()
     if text.startswith("```"):
