@@ -307,7 +307,8 @@ async def query_image(image: UploadFile = File(...)):
     try:
         mime = image.content_type or "image/jpeg"
         mood = analyze_image_mood(image_bytes, mime_type=mime)
-    except Exception:
+    except Exception as e:
+        logger.error("Image mood analysis failed: %s", e, exc_info=True)
         raise HTTPException(500, "이미지 분위기 분석에 실패했습니다. 다른 이미지로 시도해주세요.")
 
     try:
