@@ -152,7 +152,7 @@ def alloydb_nl_to_sql(query: str) -> str:
         cursor = conn.cursor()
         prompt = ALLOYDB_NL_PROMPT + query
         cursor.execute(
-            "SELECT google_ml.predict_row('publishers/google/models/gemini-2.0-flash', json_build_object('contents', json_build_array(json_build_object('role', 'user', 'parts', json_build_array(json_build_object('text', %s::text))))))::jsonb",
+            "SELECT google_ml.predict_row('projects/track3-491911/locations/us-central1/publishers/google/models/gemini-2.0-flash', json_build_object('contents', json_build_array(json_build_object('role', 'user', 'parts', json_build_array(json_build_object('text', %s::text))))))::jsonb",
             (prompt,),
         )
         row = cursor.fetchone()
