@@ -7,7 +7,7 @@ import json
 import logging
 import os
 
-import google.generativeai as genai
+from google import genai
 import pg8000
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 
@@ -24,8 +24,7 @@ DB_NAME = os.environ.get("DB_NAME", "postgres")
 DB_PORT = int(os.environ.get("DB_PORT", "5432"))
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 
-genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
+client = genai.Client(api_key=GOOGLE_API_KEY)
 
 app = FastAPI(title="Spotify NLQ Agent")
 templates = Jinja2Templates(directory="templates")
@@ -117,8 +116,9 @@ Natural language query: {query}
 
 
 def nl_to_sql(query: str) -> str:
-    response = model.generate_content(
-        NL_TO_SQL_PROMPT.format(schema=SCHEMA_CONTEXT, query=query)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=NL_TO_SQL_PROMPT.format(schema=SCHEMA_CONTEXT, query=query),
     )
     sql = response.text.strip()
     # Clean markdown fences if present
@@ -152,7 +152,7 @@ def alloydb_nl_to_sql(query: str) -> str:
         cursor = conn.cursor()
         prompt = ALLOYDB_NL_PROMPT + query
         cursor.execute(
-            "SELECT google_ml.predict_row('projects/track3-491911/locations/us-central1/publishers/google/models/gemini-2.5-flash', json_build_object('contents', json_build_array(json_build_object('role', 'user', 'parts', json_build_array(json_build_object('text', %s::text))))))::jsonb",
+            "SELECT google_ml.predict_row('gemini-2.5-flash:generateContent', json_build_object('contents', json_build_array(json_build_object('role', 'user', 'parts', json_build_array(json_build_object('text', %s::text))))))::jsonb",
             (prompt,),
         )
         row = cursor.fetchone()
@@ -202,12 +202,15 @@ Map the visual mood to Spotify audio features:
 Return ONLY the JSON, no markdown."""
 
 
-def analyze_image_mood(image_bytes: bytes) -> dict:
+def analyze_image_mood(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     b64 = base64.b64encode(image_bytes).decode()
-    response = model.generate_content([
-        IMAGE_MOOD_PROMPT,
-        {"mime_type": "image/jpeg", "data": b64},  # Gemini handles common formats
-    ])
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[
+            IMAGE_MOOD_PROMPT,
+            {"mime_type": mime_type, "data": b64},
+        ],
+    )
     text = response.text.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -304,7 +307,8 @@ async def query_image(image: UploadFile = File(...)):
         raise HTTPException(400, "이미지를 읽을 수 없습니다. 다른 파일로 시도해주세요.")
 
     try:
-        mood = analyze_image_mood(image_bytes)
+        mime = image.content_type or "image/jpeg"
+        mood = analyze_image_mood(image_bytes, mime_type=mime)
     except Exception:
         raise HTTPException(500, "이미지 분위기 분석에 실패했습니다. 다른 이미지로 시도해주세요.")
 
